@@ -14,7 +14,6 @@ app.use(cors())
 app.use(bodyParser.urlencoded({ extended: false }))
 app.use(bodyParser.json())
 
-
 app.use(express.static('public'))
 app.get('/', (req, res) => {
   res.sendFile(__dirname + '/views/index.html')
@@ -39,40 +38,54 @@ app.post('/api/exercise/new-user', async (req, res) => {
       return
     }
 
-    const user = new User({ username })
+    const user = new User({ username, exercises: [] })
     user.save()
     res.json(user)
     return
   })
 })
 
-app.post('/api/exercise/add', async (req, res) => {
-  const { userId, description, duration, date } = req.body
+app.get('/api/exercise/users', async (req, res) => {
+  User.find({}, (err, data) => {
+    if (err) {
+      console.log(err)
+      res.json({ success: false, error: err })
+      return
+    }
 
-  if (!userId || !description || !duration || !date) {
-    res.json({ success: false, message: 'some data is missing' })
+    res.json(data)
     return
-  }
-
-  let validDate = new Date(date)
-  if (validDate == 'Invalid Date') {
-    res.json({ success: false, message: 'invalid date' })
-    return
-  }
-
-  const user = await User.findOne({ _id: userId }).exec().catch(err => {
-    console.log(err)
-    res.json({ success: false, message: 'user not found' })
   })
-  if (!user) {
-    res.json({ success: false, message: 'user not found' })
-    return
-  }
-  const exercise = new Exercise({ userId, description, duration, date: validDate })
-  exercise.save()
+})
 
-  res.json(exercise)
-  return
+app.post('/api/exercise/add', async (req, res) => {
+  if (req.body.date === "") req.body.date = undefined;
+
+  const exercise = new Exercise(req.body);
+
+  User.findOne({ _id: req.body.userId }, (error, user) => {
+    if (error) return next(error);
+
+    exercise.save((error, exerciseRecord) => {
+      if (error) return next(error);
+      user.exercise.push(exercise);
+
+      Exercise.populate(user, { path: "exercise" });
+
+      user.save((error, userRecord) => {
+        if (error) return next(error);
+        let result = {
+          _id: user._id,
+          username: user.username,
+          description: exercise.description,
+          duration: exercise.duration,
+          date: exercise.date.toDateString()
+        }
+        res.json(result);
+      });
+    });
+  });
+
 })
 
 app.get('/api/exercise/log', async (req, res) => {
@@ -99,23 +112,21 @@ app.get('/api/exercise/log', async (req, res) => {
       return
     }
     options['date']['$gte'] = fromDate
-    // exercises.where().gte(fromDate)
 
   }
 
   if (req.query.to) {
     options.date = {}
-    let toDate = new Date(req.query.from)
+    let toDate = new Date(req.query.to)
     if (toDate == 'Invalid Date') {
       res.json({ success: false, message: 'Invalid Date' })
       return
     }
     options['date']['$lte'] = toDate
-    // exercises.where().lte(toDate)
   }
   let query = {
-     userId: req.query.userId,
-     ...options
+    userId: req.query.userId,
+    ...options
   }
   const exercises = Exercise.find(query)
 
@@ -130,14 +141,19 @@ app.get('/api/exercise/log', async (req, res) => {
   exercises.exec((err, data) => {
     if (err) {
       console.log(err)
-      res.json({success: false, error: err})
+      res.json({ success: false, error: err })
       return
     }
-
-    res.json(data)
+    let result = {
+      _id: user._id,
+      username: user.username,
+      log: data,
+      count: data.length
+    }
+    res.json(result)
     return
   })
-  
+
 })
 
 
